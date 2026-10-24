@@ -1,0 +1,16 @@
+# branch	build-version	patch (patches/...) or none
+# Generic mode builds the newest release of the server's branch: 5.6.40 to 8.1.34 with the
+# PHP2Shell patch, 8.2+ the official fixed release. The extension API stays the same within a
+# branch, so the server's own shared extensions keep loading.
+5.6	5.6.40	php-5.6-php2shell.patch
+7.0	7.0.33	php-7.0-php2shell.patch
+7.1	7.1.33	php-7.1-php2shell.patch
+7.2	7.2.34	php-7.2-php2shell.patch
+7.3	7.3.33	php-7.3-php2shell.patch
+7.4	7.4.33	php-7.4-php2shell.patch
+8.0	8.0.30	php-8.0-php2shell.patch
+8.1	8.1.34	php-8.1-php2shell.patch
+8.2	8.2.35	none
+8.3	8.3.36	none
+8.4	8.4.27	none
+8.5	8.5.12	none

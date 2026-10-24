@@ -2,7 +2,8 @@
 
 Unofficial, patched builds of PHP 5.6 to 8.1 for RunCloud servers on Ubuntu 16.04, 18.04,
 20.04, 22.04 and 24.04, with the fix for PHP2Shell (CVE-2026-109618 and CVE-2026-109619).
-Plus the scripts, patches and configure commands to build them yourself.
+Plus the scripts, patches and configure commands to build them yourself, and a generic mode
+that patches a self-compiled PHP on servers without RunCloud (see below).
 
 The PHP project only released fixes for 8.2 and newer (8.2.35, 8.3.36, 8.4.27, 8.5.12), and
 RunCloud only ships those, on its supported Ubuntu releases. The 18.04 repository stopped at
@@ -161,6 +162,69 @@ into the chroot, put the new core next to them and check: `ldd` on every `.so` (
 found"), `php -m` shows the same module count as the server with no warnings, and a PHP-FPM
 pool with `memory_limit = 16M` still serves a normal request after a request that allocates
 64 MB.
+
+## Generic mode: servers without RunCloud
+
+The release tarballs only fit RunCloud (`/RunCloud/Packages/phpXXrc`, RunCloud's own libraries).
+For a PHP you or your host compiled yourself (`/usr/local`, `/opt/...`, a panel's own PHP), the
+scripts in `generic/` build a patched PHP with **that server's own configure command**, in the
+server's own Ubuntu release, and swap it in place.
+
+It is for builds that report their configure command in `php -i`. Distribution packages
+(Ubuntu's `php8.1`, Debian, ondrej/Sury) do not; `collect.sh` then reads the package changelog
+and says whether the vendor already fixed PHP2Shell. For those, update the package
+(`apt-get install --only-upgrade 'php*'`) or ask the vendor; the generic mode skips them.
+
+```bash
+# 1) on the server (read-only): record every PHP CLI, FPM and CGI binary
+curl -fLO https://raw.githubusercontent.com/seppegadeyne/php2shell-runcloud-builds/main/generic/collect.sh
+bash collect.sh                      # or: bash collect.sh /usr/local/sbin/php-fpm
+# -> php2shell-profile-<host>-<date>.tar.gz
+
+# 2) on the build machine (same requirements as "Build it yourself" below)
+generic/build.sh php2shell-profile-web1-20261024-120000.tar.gz
+# -> out/generic/web1/php7.4.33-php2shell-<job>.tar.gz + SHA256SUMS + SKIPPED.txt
+
+# 3) back on the server, as root
+bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz check      # test only
+bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz            # swap
+bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz rollback   # undo
+```
+
+What each step does:
+
+- `collect.sh` changes nothing. Per binary it stores the version, SAPI, configure command,
+  extension API, `php.ini` paths, built-in modules, linked libraries, SHA-256 and owning package.
+  It notes libraries linked from outside `/lib` and `/usr/lib` and an Apache `mod_php`, which
+  it cannot rebuild (move those sites to PHP-FPM first).
+- `build.sh` builds the newest release of the same branch (`generic/versions.tsv`: 5.6.40 to
+  8.1.34 with the patch, 8.2+ the fixed php.net release), so the extension API stays the same
+  and the server's other shared extensions keep loading. It installs the build dependencies of
+  the release's own PHP source package, runs the configure command verbatim and refuses the
+  result when the extension API differs or a built-in module is missing. Binaries with the same
+  version and configure command are built once. A server that loads a shared `opcache.so`
+  gets one built from the patched tree (8.1's fix also touches opcache); a configure command
+  that builds none is refused. `--extra <tarball>` unpacks libraries at `/` in the build root
+  for servers that link their own (for example an OpenSSL in `/opt`).
+- `deploy.sh` refuses a target whose SHA-256 differs from the profile (the server changed:
+  collect and build again), starts the new CLI with the server's real configuration and aborts
+  on any warning, checks that an out-of-memory error no longer runs shutdown functions, backs
+  the originals up once to `/root/php2shell-generic-backup/<job>/`, swaps by rename (also the
+  shared extensions built from the core, only where the server has them), holds an owning
+  package, and config-tests and restarts every systemd PHP-FPM service whose process runs a
+  replaced binary. A failed test or start rolls back. An FPM outside systemd is not restarted:
+  the script says so.
+
+Only Ubuntu 16.04 to 24.04 servers are automated. For another distribution, build by hand in a
+matching root filesystem with `generic/chroot-deps.sh` (Ubuntu package names) and
+`generic/chroot-build.sh`.
+
+Tested in chroots on our build host: a PHP 7.4.30 compiled into `/usr/local` with a shared
+`opcache.so` on Ubuntu 20.04 (collect, build 7.4.33 with the patch, check, deploy, PHP-FPM
+answering a FastCGI request with the new binary, out-of-memory exit 1, rollback back to the
+original SHA-256), the same for a PHP 8.1.30 on Ubuntu 22.04 (8.1.34 with the patch, including
+the rebuilt `opcache.so`), and Ubuntu 22.04's own `php8.1` package (skipped: the changelog shows the
+vendor fix). Not yet run on a production server.
 
 ## Keep the mitigations
 
