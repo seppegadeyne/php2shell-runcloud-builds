@@ -65,6 +65,11 @@ declare -A JOBVER=() JOBPATCH=() JOBBINS=() JOBOPC=()
 while IFS=$'\t' read -r id real ver sapi extdir; do
   [ -z "$ONLY" ] || [[ "$ONLY" == *",$id,"* ]] || continue
   d=$P/bin/$id
+  # only CLI, FPM and CGI map onto a built binary (older profiles may still list lsphp)
+  case $sapi in
+    *Command*|*FPM*|*CGI*) ;;
+    *) echo "skip $id $real: SAPI '$sapi' is not supported (CLI, FPM and CGI only)" | tee -a "$PW/skipped.txt"; continue ;;
+  esac
   if [ ! -s "$d/configure.txt" ]; then
     vf=$(sed -n 's/^vendor_fix=//p' "$d/meta.txt"); own=$(sed -n 's/^owner=//p' "$d/meta.txt")
     echo "skip $id $real: distro build without a configure command (package $own, vendor fix: $vf)" | tee -a "$PW/skipped.txt"
@@ -129,9 +134,10 @@ for job in "${!JOBVER[@]}"; do
     case $sapi in
       *FPM*) pat='sbin/php-fpm' ;;
       *CGI*) pat='bin/php-cgi' ;;
-      *)     pat='bin/php' ;;
+      *Command*) pat='bin/php' ;;
+      *) echo "ABORT: unsupported SAPI '$sapi' for $real"; exit 1 ;;
     esac
-    staged=$(grep '^binary=' "$R/src/$job/build-info.txt" | cut -d= -f2 | grep -E "/$pat[0-9.]*\$" | head -1)
+    staged=$(grep '^binary=' "$R/src/$job/build-info.txt" | cut -d= -f2 | grep -E "/${pat}[0-9.]*\$" | head -1)
     [ -n "$staged" ] || { echo "ABORT: the build has no $pat for $real"; exit 1; }
     [ "$staged" = "$real" ] || echo "note: $real is built as $staged (symlink or renamed binary on the server)"
     echo "replace=$staged|$real|$(sed -n 's/^sha256=//p' "$P/bin/$id/meta.txt")|$sapi" >> "$M"

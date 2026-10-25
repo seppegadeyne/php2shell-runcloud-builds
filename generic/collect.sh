@@ -35,6 +35,18 @@ else
   shopt -u nullglob
 fi
 
+phpinfo() {  # phpinfo() as "Key => Value" lines; php-cgi prints HTML, so turn its table rows into text
+  local out
+  out=$("$@" 2>/dev/null) || return 1
+  if printf '%s' "$out" | grep -q '<tr>'; then
+    printf '%s\n' "$out" | grep '<tr>' | sed -E -e 's#</td><td[^>]*>#\t#g' -e 's#<[^>]*>##g' \
+      -e "s/&#039;/'/g; s/&quot;/\"/g; s/&lt;/</g; s/&gt;/>/g; s/&amp;/\\&/g" \
+      | awk -F'\t' '{for(i=1;i<=NF;i++){sub(/^ +/,"",$i); sub(/ +$/,"",$i)} s=$1; for(i=2;i<=NF;i++) s=s" => "$i; print s}'
+  else
+    printf '%s\n' "$out"
+  fi
+}
+
 owner() {  # owning package of a file, or "-"
   local f=$1 o=""
   if command -v dpkg-query >/dev/null 2>&1; then o=$(dpkg-query -S "$f" 2>/dev/null | head -1 | cut -d: -f1)
@@ -57,24 +69,33 @@ for b in "${CANDS[@]}"; do
   r=$(readlink -f "$b")
   [ -n "${SEEN[$r]:-}" ] && continue
   SEEN[$r]=1
-  # lsphp/litespeed and anything that is not a PHP SAPI binary: skip quietly
+  # anything that is not a PHP SAPI binary: skip quietly
   case $(basename "$r") in *.so|*.sh|phpize*|php-config*|phpdbg*) continue ;; esac
-  info=$("$r" -n -i 2>/dev/null) || info=$("$r" -i 2>/dev/null) || continue
+  info=$(phpinfo "$r" -n -i) || info=$(phpinfo "$r" -i) || continue
   echo "$info" | grep -q '^PHP Version' || continue
-  n=$((n+1)); id=b$n; d=$P/bin/$id; mkdir -p "$d"
   ver=$(echo "$info" | awk -F' => ' '/^PHP Version/{print $2; exit}')
   sapi=$(echo "$info" | awk -F' => ' '/^Server API/{print $2; exit}')
+  # only CLI, FPM and CGI can be rebuilt; LiteSpeed's lsphp (SAPI "LiteSpeed") cannot: say so
+  case $sapi in
+    *Command*|*FPM*|*CGI*) ;;
+    *) echo "$r ($ver, $sapi)" >> "$P/unsupported.txt"
+       echo "NOTE: $r is PHP $ver with SAPI '$sapi': generic mode rebuilds CLI, FPM and CGI only; patch it another way."
+       continue ;;
+  esac
+  n=$((n+1)); id=b$n; d=$P/bin/$id; mkdir -p "$d"
   api=$(echo "$info" | awk -F' => ' '/^PHP API/{print $2; exit}')
   modapi=$(echo "$info" | awk -F' => ' '/^PHP Extension =>/{print $2; exit}')
   zendapi=$(echo "$info" | awk -F' => ' '/^Zend Extension =>/{print $2; exit}')
   build=$(echo "$info" | awk -F' => ' '/^PHP Extension Build/{print $2; exit}')
   # the real ini settings (not -n): run again without -n for paths and extension_dir
-  full=$("$r" -i 2>/dev/null || echo "$info")
+  full=$(phpinfo "$r" -i || echo "$info")
   extdir=$(echo "$full" | awk -F' => ' '/^extension_dir/{print $2; exit}')
+  # the compiled-in default (from -n) when the real run gave none
+  [ -n "$extdir" ] || extdir=$(echo "$info" | awk -F' => ' '/^extension_dir/{print $2; exit}')
   ini=$(echo "$full" | awk -F' => ' '/^Loaded Configuration File/{print $2; exit}')
   inipath=$(echo "$full" | awk -F' => ' '/^Configuration File \(php.ini\) Path/{print $2; exit}')
   scan=$(echo "$full" | awk -F' => ' '/^Scan this dir for additional .ini files/{print $2; exit}')
-  echo "$info" | awk -F' => ' '/^Configure Command/{sub(/^ +/,"",$2); print $2; exit}' > "$d/configure.txt"
+  echo "$info" | awk -F' => ' '/^Configure Command/{sub(/^ +/,"",$2); sub(/ +$/,"",$2); print $2; exit}' > "$d/configure.txt"
   echo "$full" > "$d/phpinfo.txt"
   "$r" -m > "$d/modules.txt" 2>"$d/modules.stderr" || true
   "$r" -n -m > "$d/builtin-modules.txt" 2>/dev/null || true

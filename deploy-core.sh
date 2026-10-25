@@ -31,8 +31,11 @@ restart_if_active() {
 
 if [ "$MODE" = rollback ]; then
   [ -d "$BK" ] || { echo "no backup in $BK"; exit 1; }
-  for f in $FILES; do cp -a "$BK/$f" "$P/$f"; done
-  for e in $CORE_EXT; do [ -f "$BK/ext/$e" ] && cp -a "$BK/ext/$e" "$EXTDIR/$e"; done
+  # by rename as well: copying over a running binary fails (text file busy) or corrupts it
+  for f in $FILES; do cp -a "$BK/$f" "$P/$f.rb" && mv -f "$P/$f.rb" "$P/$f"; done
+  for e in $CORE_EXT; do
+    [ -f "$BK/ext/$e" ] && cp -a "$BK/ext/$e" "$EXTDIR/$e.rb" && mv -f "$EXTDIR/$e.rb" "$EXTDIR/$e"
+  done
   apt-mark unhold "php${V}rc" >/dev/null
   restart_if_active
   echo "ROLLBACK OK: $("$P/bin/php" -v | head -1)"; exit 0

@@ -177,26 +177,32 @@ and says whether the vendor already fixed PHP2Shell. For those, update the packa
 
 ```bash
 # 1) on the server (read-only): record every PHP CLI, FPM and CGI binary
-curl -fLO https://raw.githubusercontent.com/seppegadeyne/php2shell-runcloud-builds/main/generic/collect.sh
+mkdir -p /root/php2shell && cd /root/php2shell
+RAW=https://raw.githubusercontent.com/seppegadeyne/php2shell-runcloud-builds/main/generic
+curl -fLO $RAW/collect.sh
+curl -fLO $RAW/deploy.sh             # needed in step 3
 bash collect.sh                      # or: bash collect.sh /usr/local/sbin/php-fpm
 # -> php2shell-profile-<host>-<date>.tar.gz
 
-# 2) on the build machine (same requirements as "Build it yourself" below)
+# 2) on the build machine (same requirements as "Build it yourself" above)
 generic/build.sh php2shell-profile-web1-20261024-120000.tar.gz
 # -> out/generic/web1/php7.4.33-php2shell-<job>.tar.gz + SHA256SUMS + SKIPPED.txt
+# copy the tarball and SHA256SUMS to /root/php2shell on the server
 
-# 3) back on the server, as root
-bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz check      # test only
-bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz            # swap
-bash generic/deploy.sh php7.4.33-php2shell-<job>.tar.gz rollback   # undo
+# 3) back on the server, as root, in /root/php2shell
+sha256sum -c --ignore-missing SHA256SUMS
+bash deploy.sh php7.4.33-php2shell-<job>.tar.gz check      # test only
+bash deploy.sh php7.4.33-php2shell-<job>.tar.gz            # swap
+bash deploy.sh php7.4.33-php2shell-<job>.tar.gz rollback   # undo
 ```
 
 What each step does:
 
 - `collect.sh` changes nothing. Per binary it stores the version, SAPI, configure command,
   extension API, `php.ini` paths, built-in modules, linked libraries, SHA-256 and owning package.
-  It notes libraries linked from outside `/lib` and `/usr/lib` and an Apache `mod_php`, which
-  it cannot rebuild (move those sites to PHP-FPM first).
+  It notes libraries linked from outside `/lib` and `/usr/lib`, and it reports but skips what
+  it cannot rebuild: an Apache `mod_php` (move those sites to PHP-FPM first) and LiteSpeed's
+  `lsphp` (SAPI LiteSpeed; patch it through LiteSpeed's own packages).
 - `build.sh` builds the newest release of the same branch (`generic/versions.tsv`: 5.6.40 to
   8.1.34 with the patch, 8.2+ the fixed php.net release), so the extension API stays the same
   and the server's other shared extensions keep loading. It installs the build dependencies of
@@ -220,7 +226,7 @@ matching root filesystem with `generic/chroot-deps.sh` (Ubuntu package names) an
 `generic/chroot-build.sh`.
 
 Tested in chroots on our build host: a PHP 7.4.30 compiled into `/usr/local` with a shared
-`opcache.so` on Ubuntu 20.04 (collect, build 7.4.33 with the patch, check, deploy, PHP-FPM
+`opcache.so` and `php-cgi` on Ubuntu 20.04 (collect, build 7.4.33 with the patch, check, deploy, PHP-FPM
 answering a FastCGI request with the new binary, out-of-memory exit 1, rollback back to the
 original SHA-256), the same for a PHP 8.1.30 on Ubuntu 22.04 (8.1.34 with the patch, including
 the rebuilt `opcache.so`), and Ubuntu 22.04's own `php8.1` package (skipped: the changelog shows the

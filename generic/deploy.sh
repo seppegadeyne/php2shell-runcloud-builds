@@ -24,7 +24,6 @@ tar -xzf "$TB" -C "$T"
 M=$T/MANIFEST
 [ -f "$M" ] || { echo "not a generic build (no MANIFEST)"; exit 1; }
 JOB=$(sed -n 's/^job=//p' "$M"); HOSTM=$(sed -n 's/^host=//p' "$M")
-EXTDIR=$(sed -n 's/^extension_dir=//p' "$M")
 BK=/root/php2shell-generic-backup/$JOB
 THISHOST=$(hostname -s 2>/dev/null || hostname)
 [ "$HOSTM" = "$THISHOST" ] || echo "WARNING: built for host '$HOSTM', this is '$THISHOST'"
