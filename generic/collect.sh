@@ -3,7 +3,7 @@
 # Run on the server (root is best, so package ownership and every binary can be read).
 #
 #   bash collect.sh                       find every PHP CLI / FPM / CGI binary
-#   bash collect.sh /usr/sbin/php-fpm7.4  record only the binaries you name
+#   bash collect.sh /usr/sbin/php-fpm7.4  record only the binaries you name (name CLI, CGI and FPM)
 #
 # Output: php2shell-profile-<host>-<date>.tar.gz in the current directory.
 # Copy it to the build machine and run generic/build.sh on it.
@@ -26,12 +26,14 @@ else
   shopt -s nullglob
   CANDS=(/usr/bin/php /usr/bin/php[0-9]* /usr/bin/php-cgi* /usr/sbin/php-fpm*
          /usr/local/bin/php /usr/local/bin/php-cgi /usr/local/sbin/php-fpm
-         /opt/*/bin/php /opt/*/sbin/php-fpm /opt/*/*/bin/php /opt/*/*/sbin/php-fpm
-         /opt/remi/*/root/usr/bin/php /opt/remi/*/root/usr/sbin/php-fpm
+         /usr/local/php*/bin/php /usr/local/php*/bin/php-cgi /usr/local/php*/sbin/php-fpm
+         /opt/*/bin/php /opt/*/bin/php-cgi /opt/*/sbin/php-fpm
+         /opt/*/*/bin/php /opt/*/*/bin/php-cgi /opt/*/*/sbin/php-fpm
+         /opt/remi/*/root/usr/bin/php /opt/remi/*/root/usr/bin/php-cgi /opt/remi/*/root/usr/sbin/php-fpm
          /RunCloud/Packages/php*rc/bin/php /RunCloud/Packages/php*rc/sbin/php-fpm
          /usr/local/lsws/lsphp*/bin/php /usr/local/lsws/lsphp*/bin/lsphp
-         /opt/cpanel/ea-php*/root/usr/bin/php /opt/cpanel/ea-php*/root/usr/sbin/php-fpm
-         /opt/plesk/php/*/bin/php /opt/plesk/php/*/sbin/php-fpm)
+         /opt/cpanel/ea-php*/root/usr/bin/php /opt/cpanel/ea-php*/root/usr/bin/php-cgi /opt/cpanel/ea-php*/root/usr/sbin/php-fpm
+         /opt/plesk/php/*/bin/php /opt/plesk/php/*/bin/php-cgi /opt/plesk/php/*/sbin/php-fpm)
   shopt -u nullglob
 fi
 
@@ -81,6 +83,9 @@ for b in "${CANDS[@]}"; do
     *) echo "$r ($ver, $sapi)" >> "$P/unsupported.txt"
        echo "NOTE: $r is PHP $ver with SAPI '$sapi': generic mode rebuilds CLI, FPM and CGI only; patch it another way."
        continue ;;
+  esac
+  case $r in /usr/local/lsws/*)
+    echo "NOTE: $r belongs to LiteSpeed: only this $sapi binary is rebuilt, not the lsphp handler next to it." ;;
   esac
   n=$((n+1)); id=b$n; d=$P/bin/$id; mkdir -p "$d"
   api=$(echo "$info" | awk -F' => ' '/^PHP API/{print $2; exit}')

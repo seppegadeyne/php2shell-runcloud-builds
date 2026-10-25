@@ -29,7 +29,12 @@ THISHOST=$(hostname -s 2>/dev/null || hostname)
 [ "$HOSTM" = "$THISHOST" ] || echo "WARNING: built for host '$HOSTM', this is '$THISHOST'"
 
 mapfile -t REPL < <(sed -n 's/^replace=//p' "$M")
+# ext=<file in the tarball>|<file on the server> (older builds: one path for both)
 mapfile -t EXTS < <(sed -n 's/^ext=//p' "$M")
+
+prop() {  # prop <property> <unit>; no --value, which systemd 229 (Ubuntu 16.04) lacks
+  systemctl show -p "$1" "$2" 2>/dev/null | sed -n "s/^$1=//p"
+}
 
 hold() {  # hold|unhold <file>
   local f=$1 act=$2 pkg=""
@@ -50,7 +55,7 @@ fpm_services() {  # services whose main process runs <binary>
   local bin=$1 u pid exe
   [ -d /run/systemd/system ] || return 0
   for u in $(systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}'); do
-    pid=$(systemctl show -p MainPID --value "$u" 2>/dev/null); [ "${pid:-0}" -gt 0 ] || continue
+    pid=$(prop MainPID "$u"); [ "${pid:-0}" -gt 0 ] || continue
     exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true); exe=${exe% (deleted)}
     [ "$exe" = "$bin" ] && echo "$u"
   done
@@ -59,17 +64,19 @@ fpm_services() {  # services whose main process runs <binary>
 
 fpm_test() {  # fpm_test <binary> <unit>: config test with the unit's own --fpm-config / -y
   local bin=$1 u=$2 cmd conf
-  cmd=$(systemctl show -p ExecStart --value "$u" 2>/dev/null | sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p')
+  cmd=$(prop ExecStart "$u" | sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p')
   conf=$(echo "$cmd" | grep -o -E '(--fpm-config|-y)[ =][^ ]+' | head -1 | sed -E 's/^(--fpm-config|-y)[ =]//')
   if [ -n "$conf" ]; then "$bin" -t -y "$conf"; else "$bin" -t; fi
 }
 
-# which services run the FPM binaries we touch (decided before the swap)
+# which services run the FPM binaries we touch (decided before the swap; a rollback started
+# by a failed deploy gets the same list, so it also brings back a unit that failed to start)
 declare -A UNITS=()
 for r in "${REPL[@]}"; do
   IFS='|' read -r staged real osha sapi <<< "$r"
   case $sapi in *FPM*) for u in $(fpm_services "$real"); do UNITS[$u]=$real; done ;; esac
 done
+for kv in ${PHP2SHELL_UNITS:-}; do UNITS[${kv%%=*}]=${kv#*=}; done
 
 restart_units() {
   local u
@@ -88,10 +95,13 @@ if [ "$MODE" = rollback ]; then
     IFS='|' read -r staged real osha sapi <<< "$r"
     [ -f "$BK$real" ] && { cp -a "$BK$real" "$real.php2shell-rb" && mv -f "$real.php2shell-rb" "$real"; hold "$real" unhold; }
   done
-  for e in "${EXTS[@]}"; do
-    [ -f "$BK$e" ] && cp -a "$BK$e" "$e.php2shell-rb" && mv -f "$e.php2shell-rb" "$e"
+  for x in "${EXTS[@]}"; do
+    IFS='|' read -r _ e <<< "$x"; e=${e:-$x}
+    if [ -f "$BK$e" ]; then cp -a "$BK$e" "$e.php2shell-rb" && mv -f "$e.php2shell-rb" "$e"; fi
   done
-  restart_units || true
+  if ! restart_units; then
+    echo "ROLLBACK: files restored, but a PHP-FPM service did not start. Check: systemctl status ${!UNITS[*]}"; exit 1
+  fi
   echo "ROLLBACK OK ($JOB)"; exit 0
 fi
 
@@ -110,8 +120,11 @@ done
 CLI=$(for r in "${REPL[@]}"; do IFS='|' read -r s _ _ sp <<< "$r"; case $sp in *Command*) echo "$T$s";; esac; done | head -1)
 [ -n "$CLI" ] || CLI=$(find "$T" -type f -path '*/bin/php*' ! -name 'php-c*' ! -name 'phpize*' | head -1)
 if [ -n "$CLI" ]; then
-  "$CLI" -m > "$T/mods" 2> "$T/err" || true
-  if grep -qi -E 'warning|error' "$T/err"; then cat "$T/err"; echo "ABORT: startup warnings with the server's configuration"; exit 1; fi
+  rc=0; "$CLI" -m > "$T/mods" 2> "$T/err" || rc=$?
+  if [ "$rc" != 0 ] || ! grep -q -i '^core$' "$T/mods"; then
+    cat "$T/err"; echo "ABORT: the new CLI did not run (exit $rc). A noexec /tmp? Try: TMPDIR=/root bash $0 ..."; exit 1
+  fi
+  if grep -qi -E 'warning|error' "$T/err" "$T/mods"; then cat "$T/err"; echo "ABORT: startup warnings with the server's configuration"; exit 1; fi
   # out of memory must end the process without running shutdown functions (the PHP2Shell fix)
   if grep -q -v '=none' <(grep '^patch=' "$M"); then
     o=$("$CLI" -d memory_limit=8M -r 'register_shutdown_function(function(){echo "shutdown-ran\n";}); $a=str_repeat("x", 64*1024*1024);' 2>/dev/null || true)
@@ -124,7 +137,10 @@ fi
 # 3) back up the originals once
 if [ ! -d "$BK" ]; then
   for r in "${REPL[@]}"; do IFS='|' read -r staged real osha sapi <<< "$r"; mkdir -p "$BK$(dirname "$real")"; cp -a "$real" "$BK$real"; done
-  for e in "${EXTS[@]}"; do [ -f "$e" ] && { mkdir -p "$BK$(dirname "$e")"; cp -a "$e" "$BK$e"; }; done
+  for x in "${EXTS[@]}"; do
+    IFS='|' read -r _ e <<< "$x"; e=${e:-$x}
+    if [ -f "$e" ]; then mkdir -p "$BK$(dirname "$e")"; cp -a "$e" "$BK$e"; fi
+  done
   cp "$M" "$BK/MANIFEST"
 fi
 
@@ -135,15 +151,18 @@ for r in "${REPL[@]}"; do
   hold "$real" hold
 done
 n=0
-for e in "${EXTS[@]}"; do
-  [ -f "$e" ] && [ -f "$T$e" ] || continue      # only extensions the server already has
-  install -m 755 "$T$e" "$e.php2shell-new" && mv -f "$e.php2shell-new" "$e"; n=$((n+1))
+for x in "${EXTS[@]}"; do
+  IFS='|' read -r s e <<< "$x"; e=${e:-$s}
+  [ -f "$e" ] && [ -f "$T$s" ] || continue      # only extensions the server already has
+  install -m 755 "$T$s" "$e.php2shell-new" && mv -f "$e.php2shell-new" "$e"; n=$((n+1))
 done
 echo "swapped: ${#REPL[@]} binaries, $n shared extensions from the core"
 
 # 5) restart the FPM services that ran a replaced binary; roll back on failure
 if ! restart_units; then
-  echo "FPM TEST OR START FAILED -> rollback"; exec bash "$0" "$TB" rollback
+  echo "FPM TEST OR START FAILED -> rollback"
+  ul=""; for u in "${!UNITS[@]}"; do ul="$ul $u=${UNITS[$u]}"; done
+  PHP2SHELL_UNITS=$ul exec bash "$0" "$TB" rollback
 fi
 if [ "${#UNITS[@]}" -eq 0 ]; then echo "no running PHP-FPM service uses these binaries (nothing restarted; restart it yourself if it runs outside systemd)"; fi
 echo "DEPLOY OK ($JOB): $(sed -n 's/^php=//p' "$M"), patch $(sed -n 's/^patch=//p' "$M")"

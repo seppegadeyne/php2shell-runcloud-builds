@@ -116,8 +116,10 @@ and compare the status codes.
 
 ## Build it yourself
 
-Requirements: Linux x86_64, `unshare` (util-linux) with user namespaces enabled, `curl`,
-`tar`, `xz`, about 5 GB of disk per Ubuntu release, and a subordinate ID range for your user:
+Requirements: Linux x86_64, `unshare` from util-linux 2.38 or newer (for `--map-users`; Ubuntu
+22.04 ships 2.37, Ubuntu 24.04, Debian 12, Fedora and Arch are fine) with user
+namespaces enabled, `newuidmap` (package `uidmap`), `curl`, `tar`, `xz`, about 5 GB of disk per
+Ubuntu release, and a subordinate ID range for your user:
 
 ```bash
 grep "^$USER:" /etc/subuid /etc/subgid   # must print a range in both files

@@ -15,8 +15,7 @@
 #
 # Output: out/generic/<host>/php<version>-<job>.tar.gz + MANIFEST + SHA256SUMS
 set -euo pipefail
-cd "$(dirname "$(realpath "$0")")/.."
-TOP=$PWD
+# resolve the arguments against the caller's directory, before changing to the repository root
 PROF=$(realpath "${1:?usage: generic/build.sh <profile.tar.gz> [--only b1,b2] [--extra tarball]}"); shift
 ONLY=""; EXTRA=""
 while [ $# -gt 0 ]; do
@@ -26,7 +25,11 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1"; exit 1 ;;
   esac
 done
+cd "$(dirname "$(realpath "$0")")/.."
+TOP=$PWD
 
+unshare --help 2>/dev/null | grep -q -- --map-users && command -v newuidmap >/dev/null || {
+  echo "Needs unshare with --map-users (util-linux 2.38 or newer) and newuidmap (package uidmap)."; exit 1; }
 grep -q "^$(id -un):" /etc/subuid && grep -q "^$(id -un):" /etc/subgid || {
   echo "Your user needs a range in /etc/subuid and /etc/subgid (see README)."; exit 1; }
 
@@ -89,7 +92,9 @@ while IFS=$'\t' read -r id real ver sapi extdir; do
   fi
   echo "plan $id $real: PHP $ver -> $bver (${patch}) job $job"
 done < "$P/binaries.tsv"
-[ "${#JOBVER[@]}" -gt 0 ] || { echo "nothing to build (see the skip lines above)"; exit 1; }
+OUT=$TOP/out/generic/$HOST; mkdir -p "$OUT"
+cp "$PW/skipped.txt" "$OUT/SKIPPED.txt"
+[ "${#JOBVER[@]}" -gt 0 ] || { echo "nothing to build (see the skip lines above, also in $OUT/SKIPPED.txt)"; exit 1; }
 
 # --- build root -----------------------------------------------------------------------------
 R=$W/rootfs-generic-$DIST
@@ -108,14 +113,16 @@ if [ -n "$EXTRA" ]; then
 fi
 scripts/enter.sh "$R" /src/chroot-deps.sh "$DIST"
 
-OUT=$TOP/out/generic/$HOST; mkdir -p "$OUT"
 for job in "${!JOBVER[@]}"; do
   ver=${JOBVER[$job]}; patch=${JOBPATCH[$job]}
   first=$(echo "${JOBBINS[$job]}" | awk '{print $1}')
   echo "=== $job: PHP $ver for${JOBBINS[$job]} (patch: $patch)"
   fetch "https://www.php.net/distributions/php-$ver.tar.xz" "php-$ver.tar.xz"
   cp "$DL/php-$ver.tar.xz" "$R/src/"
-  [ "$patch" = none ] || grep -q " $patch\$" sources.sha256
+  if [ "$patch" != none ]; then
+    want=$(awk -v f="$patch" '$2==f{print $1}' sources.sha256)
+    echo "$want  patches/$patch" | sha256sum -c --quiet || { echo "CHECKSUM MISMATCH: patches/$patch"; exit 1; }
+  fi
   rm -rf "${R:?}/src/$job"; mkdir -p "$R/src/$job"
   cp "$P/bin/$first/configure.txt" "$R/src/$job/"
   [ -n "${JOBOPC[$job]:-}" ] && touch "$R/src/$job/want-opcache"
@@ -149,16 +156,18 @@ for job in "${!JOBVER[@]}"; do
       [ -z "${miss// }" ] || { echo "ABORT: built-in modules missing in the build for $real: $miss"; exit 1; }
     fi
   done
-  # shared extensions built from the core, replaced only where the server has the same file
+  # shared extensions built from the core, replaced only where the server has the same file.
+  # The server may load them from another directory than the compiled-in one (extension_dir in
+  # php.ini), so target the directory the server really uses: ext=<file in tarball>|<server file>
   extdir=$(sed -n 's/^extension_dir=//p' "$R/src/$job/build-info.txt")
+  sext=$(sed -n 's/^extension_dir=//p' "$P/bin/$first/meta.txt"); sext=${sext:-$extdir}
   for e in $(grep '^ext=' "$R/src/$job/build-info.txt" | cut -d= -f2); do
-    echo "ext=$extdir/$e" >> "$M"
+    echo "ext=$extdir/$e|$sext/$e" >> "$M"
   done
   name=php$ver-$( [ "$patch" = none ] || echo php2shell- )$job
   # shellcheck disable=SC2015
   ( cd "$R/stage-$job" && cp "$M" ./MANIFEST && tar -czf "$OUT/$name.tar.gz" . )
   echo "OUT $OUT/$name.tar.gz"
 done
-cp "$PW/skipped.txt" "$OUT/SKIPPED.txt"
 ( cd "$OUT" && sha256sum -- *.tar.gz > SHA256SUMS )
 echo "done: $(ls "$OUT"/*.tar.gz | wc -l) tarball(s) in $OUT"

@@ -16,8 +16,13 @@ case $DIST in
   *) echo "unknown codename $DIST"; exit 1 ;;
 esac
 
-# deb-src next to every deb line, so apt-get build-dep works
-sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/php2shell-src.list
+# deb-src next to every deb line, so apt-get build-dep works (one-line format up to 22.04,
+# deb822 ubuntu.sources from 24.04)
+if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+  sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+else
+  sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/php2shell-src.list
+fi
 apt-get update -qq
 
 BASE="build-essential autoconf bison re2c pkg-config ca-certificates curl xz-utils patch file"

@@ -22,6 +22,8 @@ case $DIST in
   *) echo "unknown codename: $DIST"; exit 1 ;;
 esac
 
+unshare --help 2>/dev/null | grep -q -- --map-users && command -v newuidmap >/dev/null || {
+  echo "Needs unshare with --map-users (util-linux 2.38 or newer) and newuidmap (package uidmap)."; exit 1; }
 grep -q "^$(id -un):" /etc/subuid && grep -q "^$(id -un):" /etc/subgid || {
   echo "Your user needs a range in /etc/subuid and /etc/subgid (see README)."; exit 1; }
 

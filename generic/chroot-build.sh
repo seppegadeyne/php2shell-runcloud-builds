@@ -37,7 +37,7 @@ EXTDIR=$(sed -n "s/^extension_dir=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$PHPCONFIG" |
 # produce one from this patched tree, or the old, unpatched opcache.so would stay in use.
 if [ -f "$J/want-opcache" ] && [ ! -f "$S$EXTDIR/opcache.so" ]; then
   echo "ABORT: the server has a shared opcache.so but this configure command builds none."
-  echo "Add --enable-opcache=shared to $J/configure.txt (the server's opcache.so comes from elsewhere)."
+  echo "Add '--enable-opcache=shared' to bin/<id>/configure.txt in the profile, pack it again and rerun build.sh."
   exit 1
 fi
 
