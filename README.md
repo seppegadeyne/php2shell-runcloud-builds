@@ -100,7 +100,8 @@ The hold is the trade-off: that version gets no RunCloud updates at all until yo
 ```bash
 # the running FPM master uses the new file
 sha256sum /RunCloud/Packages/php74rc/sbin/php-fpm \
-  /proc/$(systemctl show -p MainPID --value php74rc-fpm)/exe
+  /proc/$(systemctl show -p MainPID php74rc-fpm | cut -d= -f2)/exe
+# (no --value: systemd 229 on Ubuntu 16.04 does not have it)
 # compare with the file in the tarball
 tar -xzf php74rc-7.4.33-php2shell-focal.tar.gz -O RunCloud/Packages/php74rc/sbin/php-fpm | sha256sum
 
