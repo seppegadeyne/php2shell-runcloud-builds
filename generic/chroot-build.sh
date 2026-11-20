@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs INSIDE the chroot (generic mode). Builds one PHP with the server's own configure command.
-# usage: /src/chroot-build.sh <full-version> <patch-file|none> <job-id>
+# usage: /src/chroot-build.sh <full-version> <patch[,patch...]|none> <job-id>
 #   /src/<job-id>/configure.txt   the server's configure command (php -i, "Configure Command")
 #   /src/<job-id>/want-opcache    present when the server has a shared opcache.so this build must replace
 # Result: /stage-<job-id>/ (make install INSTALL_ROOT) and /src/<job-id>/build-info.txt
@@ -11,15 +11,18 @@ cd /root && rm -rf "php-$FV-$JOB" && mkdir "php-$FV-$JOB" && tar -xJf "/src/php-
 cd "php-$FV-$JOB"
 
 if [ "$PATCH" != none ]; then
-  if ! patch -p1 --dry-run < "/src/$PATCH" > "$J/patch.log" 2>&1; then
-    echo "PATCH FAILED:"; grep -E "FAILED|can't find|Hunk" "$J/patch.log" | head -20; exit 2
-  fi
-  if grep -q fuzz "$J/patch.log"; then echo "PATCH NEEDS FUZZ, refusing"; exit 2; fi
-  patch -p1 < "/src/$PATCH" >/dev/null
-  echo "patch applied: $PATCH"
+  IFS=, read -r -a PLIST <<< "$PATCH"
+  for p in "${PLIST[@]}"; do
+    if ! patch -p1 --dry-run < "/src/$p" > "$J/patch.log" 2>&1; then
+      echo "PATCH FAILED: $p"; grep -E "FAILED|can't find|Hunk" "$J/patch.log" | head -20; exit 2
+    fi
+    if grep -q fuzz "$J/patch.log"; then echo "PATCH NEEDS FUZZ, refusing: $p"; exit 2; fi
+    patch -p1 < "/src/$p" >/dev/null
+    echo "patch applied: $p"
+    # a patched configure.ac (5.6-7.3 ports) needs a fresh configure script
+    if grep -q "configure.ac\|configure.in" "/src/$p"; then ./buildconf --force >/dev/null 2>&1 || true; fi
+  done
 fi
-# a patched configure.ac (5.6-7.3 ports) needs a fresh configure script
-grep -q "configure.ac\|configure.in" "/src/$PATCH" 2>/dev/null && ./buildconf --force >/dev/null 2>&1 || true
 
 # the server's command, verbatim. It starts with './configure' and quotes every argument.
 eval "$(cat "$J/configure.txt")" > "$J/configure.log" 2>&1 \

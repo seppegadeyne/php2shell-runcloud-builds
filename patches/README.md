@@ -1,7 +1,12 @@
 # Patches
 
-Every patch fixes PHP2Shell (CVE-2026-109618 and CVE-2026-109619) and applies with
-`patch -p1` to the unmodified php.net tarball. None needs fuzz; some hunks need a line offset.
+Two patches per PHP version, applied in this order with `patch -p1` to the unmodified php.net
+tarball (`matrix.tsv` lists them per build). None needs fuzz; some hunks need a line offset.
+
+- `php-X.Y-php2shell.patch`: PHP2Shell (CVE-2026-109618 and CVE-2026-109619), October 2026.
+- `php-X.Y-phpaftershell.patch`: phpAfterShell (CVE-2026-126714), November 2026.
+
+## PHP2Shell
 
 | File | For | Origin |
 | --- | --- | --- |
@@ -24,3 +29,35 @@ under the PHP License 3.01, see `../licenses/`. Checksums are in `../sources.sha
 
 PHP 5.5 is not covered: hunk 10 of the 5.6 patch fails in `Zend/zend_alloc.c` and no other
 patch exists.
+
+## phpAfterShell
+
+| File | For | Origin |
+| --- | --- | --- |
+| `php-5.6-phpaftershell.patch` | 5.6.40 | Surý php5.6 `5.6.40-109`: `0397-Fix-GHSA-fm2m-fjf5-v3cp-RCE-via-corrupted-session-fi.patch` |
+| `php-7.0-phpaftershell.patch` | 7.0.33 | Surý php7.0 `7.0.33-97`: `0359-Fix-GHSA-fm2m-...` |
+| `php-7.1-phpaftershell.patch` | 7.1.33 | Surý php7.1 `7.1.33-85`: `0306-Fix-GHSA-fm2m-...` |
+| `php-7.2-phpaftershell.patch` | 7.2.34 | Surý php7.2 `7.2.34-70`: `0265-Fix-GHSA-fm2m-...` |
+| `php-7.3-phpaftershell.patch` | 7.3.33 | Surý php7.3 `7.3.33-41`: `0238-Fix-GHSA-fm2m-...` |
+| `php-7.4-phpaftershell.patch` | 7.4.33 | Surý php7.4 `7.4.33-37`: `0210-Fix-GHSA-fm2m-...` |
+| `php-8.0-phpaftershell.patch` | 8.0.30 | Surý php8.0 `8.0.30-31`: `0176-Fix-GHSA-fm2m-...` |
+| `php-8.1-phpaftershell.patch` | 8.1.34 | Surý php8.1 `8.1.34-14`: `0118-Fix-GHSA-fm2m-...` |
+
+The fix, "Fix GHSA-fm2m-fjf5-v3cp: RCE via corrupted session file", is by Ilija Tovilo (PHP
+project; the patch headers cite php-src commit `41c0941ae2`, the PHP-8.2 branch has it as
+`e2d3cee9ad`; advisory
+[GHSA-fm2m-fjf5-v3cp](https://github.com/php/php-src/security/advisories/GHSA-fm2m-fjf5-v3cp)),
+cherry-picked to the old branches by Ondřej Surý. It changes one place in
+`ext/session/mod_files.c`: the files session handler now always truncates the session file
+before it writes the new data, and stops the write when truncating fails. Before, it only
+truncated when the new data was shorter, so an interrupted write could leave the tail of the
+old session behind.
+
+The patches are redistributed unchanged (only renamed). Taken from the Debian source packages
+on packages.sury.org (`jammy` builds of November 18, 2026).
+
+## Not included
+
+The November 19, 2026 releases fixed more security bugs (13 in 8.3.37). Surý backported most of them to 5.6 to
+8.1, but this repository only carries PHP2Shell and phpAfterShell. See "What these builds do not
+fix" in the main README.

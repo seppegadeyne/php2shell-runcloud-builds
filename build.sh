@@ -5,7 +5,7 @@
 #   ./build.sh focal          build every version listed for focal in matrix.tsv
 #   ./build.sh xenial 56 74   build only php56rc and php74rc for xenial
 #
-# Output: out/phpXXrc-<version>[-php2shell]-<codename>.tar.gz
+# Output: out/phpXXrc-<version>[-php2shell-phpaftershell]-<codename>.tar.gz (suffix = patch names)
 # Work dir (root filesystems, downloads): work/ (several GB per release)
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
@@ -83,7 +83,13 @@ grep -v '^#' matrix.tsv | while IFS=$'\t' read -r d tag ver patch; do
   echo "=== $DIST php${tag}rc $ver (patch: $patch)"
   fetch "https://www.php.net/distributions/php-$ver.tar.xz" "php-$ver.tar.xz"
   cp "$DL/php-$ver.tar.xz" "$R/src/"
-  [ "$patch" = none ] || grep -q " $patch\$" sources.sha256
+  if [ "$patch" != none ]; then
+    for p in ${patch//,/ }; do
+      want=$(awk -v f="$p" '$2==f{print $1}' sources.sha256)
+      [ -n "$want" ] || { echo "no checksum for $p in sources.sha256"; exit 1; }
+      echo "$want  patches/$p" | sha256sum -c --quiet || { echo "CHECKSUM MISMATCH: patches/$p"; exit 1; }
+    done
+  fi
   scripts/enter.sh "$R" /src/chroot-deps.sh "$DIST" "$tag"
   scripts/enter.sh "$R" /src/chroot-build.sh "$ver" "$tag" "$patch" "$DIST"
   mv "$R"/src/out/php"${tag}"rc-"$ver"-*"$DIST".tar.gz "$TOP/out/"

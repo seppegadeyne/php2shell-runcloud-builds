@@ -2,7 +2,7 @@
 # Swap only the patched core of a RunCloud PHP package, keep a way back.
 # Run as root on the server.
 #
-#   bash deploy-core.sh <rc-tag> <tarball>            deploy, e.g. 74 php74rc-7.4.33-php2shell-focal.tar.gz
+#   bash deploy-core.sh <rc-tag> <tarball>            deploy, e.g. 74 php74rc-7.4.33-php2shell-phpaftershell-focal.tar.gz
 #   bash deploy-core.sh <rc-tag> <tarball> rollback   restore the original files
 #
 # Replaces bin/php, sbin/php-fpm and the shared extensions built from the PHP core

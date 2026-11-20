@@ -5,7 +5,7 @@
 #   generic/build.sh <profile.tar.gz> [--only b1,b2] [--extra <tarball-of-/opt/...>]
 #
 # Per binary in the profile that carries a configure command, it builds the newest release of
-# the same PHP branch (versions.tsv), patched for PHP2Shell where php.net has no fix, with the
+# the same PHP branch (versions.tsv), patched for PHP2Shell and phpAfterShell where php.net has no fix, with the
 # server's configure command verbatim, inside the server's own Ubuntu release (ubuntu-base),
 # so the result links the same glibc, OpenSSL and ICU and the same extension API.
 # Binaries with the same version and configure command are built once.
@@ -13,7 +13,7 @@
 # --extra: a tarball unpacked at / inside the build root first, for libraries the server links
 #          from outside /lib and /usr/lib (collect.sh lists them per binary in custom-libs.txt).
 #
-# Output: out/generic/<host>/php<version>-<job>.tar.gz + MANIFEST + SHA256SUMS
+# Output: out/generic/<host>/php<version>[-php2shell-phpaftershell]-<job>.tar.gz + MANIFEST + SHA256SUMS
 set -euo pipefail
 # resolve the arguments against the caller's directory, before changing to the repository root
 PROF=$(realpath "${1:?usage: generic/build.sh <profile.tar.gz> [--only b1,b2] [--extra tarball]}"); shift
@@ -120,8 +120,11 @@ for job in "${!JOBVER[@]}"; do
   fetch "https://www.php.net/distributions/php-$ver.tar.xz" "php-$ver.tar.xz"
   cp "$DL/php-$ver.tar.xz" "$R/src/"
   if [ "$patch" != none ]; then
-    want=$(awk -v f="$patch" '$2==f{print $1}' sources.sha256)
-    echo "$want  patches/$patch" | sha256sum -c --quiet || { echo "CHECKSUM MISMATCH: patches/$patch"; exit 1; }
+    for p in ${patch//,/ }; do
+      want=$(awk -v f="$p" '$2==f{print $1}' sources.sha256)
+      [ -n "$want" ] || { echo "no checksum for $p in sources.sha256"; exit 1; }
+      echo "$want  patches/$p" | sha256sum -c --quiet || { echo "CHECKSUM MISMATCH: patches/$p"; exit 1; }
+    done
   fi
   rm -rf "${R:?}/src/$job"; mkdir -p "$R/src/$job"
   cp "$P/bin/$first/configure.txt" "$R/src/$job/"
@@ -164,7 +167,9 @@ for job in "${!JOBVER[@]}"; do
   for e in $(grep '^ext=' "$R/src/$job/build-info.txt" | cut -d= -f2); do
     echo "ext=$extdir/$e|$sext/$e" >> "$M"
   done
-  name=php$ver-$( [ "$patch" = none ] || echo php2shell- )$job
+  # php-7.4-php2shell.patch,php-7.4-phpaftershell.patch -> php7.4.33-php2shell-phpaftershell-<job>
+  sfx=; [ "$patch" = none ] || for p in ${patch//,/ }; do n=${p#php-*-}; sfx="$sfx${n%.patch}-"; done
+  name=php$ver-$sfx$job
   # shellcheck disable=SC2015
   ( cd "$R/stage-$job" && cp "$M" ./MANIFEST && tar -czf "$OUT/$name.tar.gz" . )
   echo "OUT $OUT/$name.tar.gz"

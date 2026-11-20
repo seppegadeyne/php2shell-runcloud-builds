@@ -56,6 +56,13 @@ owner() {  # owning package of a file, or "-"
   echo "${o:--}"
 }
 
+vendor_status() {  # package changelog on stdin -> fixed | php2shell-only | not-in-changelog
+  local t; t=$(cat)
+  if grep -q -E 'CVE-2026-10961[89]' <<< "$t"; then
+    if grep -q 'CVE-2026-126714' <<< "$t"; then echo fixed; else echo php2shell-only; fi
+  else echo not-in-changelog; fi
+}
+
 # --- server ---------------------------------------------------------------------------------
 cp /etc/os-release "$P/os-release" 2>/dev/null || echo "ID=unknown" > "$P/os-release"
 { echo "host=$HOST"; echo "date=$(date -Is)"; echo "kernel=$(uname -r)"; echo "arch=$(uname -m)"
@@ -107,18 +114,17 @@ for b in "${CANDS[@]}"; do
   ldd "$r" > "$d/ldd.txt" 2>&1 || true
   sha=$(sha256sum "$r" | cut -d' ' -f1)
   own=$(owner "$r")
-  # a distro package hides its configure command; its changelog says whether the vendor fixed PHP2Shell
+  # a distro package hides its configure command; its changelog says whether the vendor fixed
+  # PHP2Shell and phpAfterShell
   vendor=unknown
   if [ "$own" != - ] && command -v dpkg-query >/dev/null 2>&1; then
     src=$(dpkg-query -W -f='${source:Package}' "$own" 2>/dev/null); src=${src:-$own}
     cl=$(ls /usr/share/doc/"$own"/changelog.Debian.gz 2>/dev/null | head -1)
-    if [ -n "$cl" ]; then
-      if zgrep -q -E 'CVE-2026-10961[89]' "$cl"; then vendor=fixed; else vendor=not-in-changelog; fi
-    fi
+    if [ -n "$cl" ]; then vendor=$(zcat "$cl" | vendor_status); fi
     echo "dpkg_version=$(dpkg-query -W -f='${Version}' "$own" 2>/dev/null)" >> "$d/pkg.txt"
     echo "dpkg_source=$src" >> "$d/pkg.txt"
   elif [ "$own" != - ] && command -v rpm >/dev/null 2>&1; then
-    if rpm -q --changelog "$own" 2>/dev/null | grep -q -E 'CVE-2026-10961[89]'; then vendor=fixed; else vendor=not-in-changelog; fi
+    vendor=$(rpm -q --changelog "$own" 2>/dev/null | vendor_status)
   fi
   printf '%s\n' "path=$b" "real=$r" "version=$ver" "sapi=$sapi" "api=$api" "modapi=$modapi" "zendapi=$zendapi" \
     "build=$build" "extension_dir=$extdir" "ini=$ini" "ini_path=$inipath" "scan_dir=$scan" \
